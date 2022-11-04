@@ -40,7 +40,8 @@
           "nThreads": "1",
 	  "nBCbins" : "103",
 	  "dicttimestamp" : "0",
-	  "geomPath" : "o2sim_geometry-aligned.root"
+	  "geomPath" : "o2sim_geometry-aligned.root",
+	  "publishSummary1D": "0"
         }
       },
       "ITSTrackTask": {
@@ -72,8 +73,19 @@
         "active": "true",
         "className": "o2::quality_control_modules::its::ITSClusterCheck",
         "moduleName": "QcITS",
-        "policy": "OnAny",
+        "policy": "OnEachSeparately",
         "detectorName": "ITS",
+        "checkParameters": {
+          "maxcluoccL0" : "5",
+          "maxcluoccL1" : "4",
+          "maxcluoccL2" : "3",
+          "maxcluoccL3" : "2",
+          "maxcluoccL4" : "1",
+          "maxcluoccL5" : "1",
+          "maxcluoccL6" : "1",
+          "skipxbinsoccupancy" : "",
+          "skipybinsoccupancy" : ""
+        },
         "dataSource": [
           {
             "type": "Task",
@@ -101,7 +113,7 @@
         "active": "true",
         "className": "o2::quality_control_modules::its::ITSTrackCheck",
         "moduleName": "QcITS",
-        "policy": "OnAny",
+        "policy": "OnEachSeparately",
         "detectorName": "ITS",
         "dataSource": [
           {

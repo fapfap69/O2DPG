@@ -43,6 +43,7 @@ parser.add_argument('-tt','--target-tasks', nargs='+', help='Runs the pipeline b
 parser.add_argument('--produce-script', help='Produces a shell script that runs the workflow in serialized manner and quits.')
 parser.add_argument('--rerun-from', help='Reruns the workflow starting from given task (or pattern). All dependent jobs will be rerun.')
 parser.add_argument('--list-tasks', help='Simply list all tasks by name and quit.', action='store_true')
+parser.add_argument('--update-resources', dest="update_resources", help='Read resource estimates from a JSON and apply where possible.')
 
 parser.add_argument('--mem-limit', help='Set memory limit as scheduling constraint (in MB)', default=0.9*max_system_mem/1024./1024)
 parser.add_argument('--cpu-limit', help='Set CPU limit (core count)', default=8)
@@ -286,8 +287,8 @@ def build_graph(taskuniverse, workflowspec):
     return (edges, nodes)
         
 
-# loads the workflow specification
-def load_workflow(workflowfile):
+# loads json into dict, e.g. for workflow specification
+def load_json(workflowfile):
     fp=open(workflowfile)
     workflowspec=json.load(fp)
     return workflowspec
@@ -408,6 +409,78 @@ def build_dag_properties(workflowspec):
     # print (global_next_tasks)
     return { 'nexttasks' : global_next_tasks, 'weights' : task_weights, 'topological_ordering' : tup[0] }
 
+# update the resource estimates of a workflow based on resources given via JSON
+def update_resource_estimates(workflow, resource_json):
+    resource_dict = load_json(resource_json)
+    stages = workflow["stages"]
+
+    for task in stages:
+        if task["timeframe"] >= 1:
+            tf = task["timeframe"]
+            name = "_".join(task["name"].split("_")[:-1])
+        else:
+            name = task["name"]
+
+        if name not in resource_dict:
+            continue
+
+        new_resources = resource_dict[name]
+
+        oldmem = task["resources"]["mem"]
+        newmem = new_resources.get("mem", task["resources"]["mem"])
+        actionlogger.info("Updating mem estimate for " + task["name"] + " from " + str(oldmem) + " to " + str(newmem))
+        task["resources"]["mem"] = newmem
+        # should we really be correcting for relative_cpu, when we have an outer estimate ??
+        oldcpu = task["resources"]["cpu"]
+        newcpu = new_resources.get("cpu", task["resources"]["cpu"])
+        actionlogger.info("Updating cpu estimate for " + task["name"] + " from " + str(oldcpu) + " to " + str(newcpu))
+        task["resources"]["cpu"] = newcpu
+
+        # CPU is a bit more invlolved
+        # if "cpu" in new_resources:
+        #    cpu = new_resources["cpu"]
+        #    rel_cpu = task["resources"]["relative_cpu"]
+        #    if rel_cpu is not None:
+        #        # respect the relative CPU settings
+        #        cpu *= rel_cpu
+        #    task["resources"]["cpu"] = cpu
+
+# a function to read a software environment determined by alienv into
+# a python dictionary
+def get_alienv_software_environment(packagestring):
+    """
+    packagestring is something like O2::v202298081-1,O2Physics::xxx
+    """
+    # alienv printenv packagestring --> dictionary
+    # for the moment this works with CVMFS only
+    cmd="/cvmfs/alice.cern.ch/bin/alienv printenv " + packagestring
+    proc = subprocess.Popen([cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+
+    envstring, err = proc.communicate()
+    # see if the printenv command was successful
+    if len(err.decode()) > 0:
+       print (err.decode())
+       raise Exception
+
+    # the software environment is now in the evnstring
+    # split it on semicolon
+    envstring=envstring.decode()
+    tokens=envstring.split(";")
+    # build envmap
+    envmap = {}
+    for t in tokens:
+      # check if assignment
+      if t.count("=") > 0:
+         assignment = t.rstrip().split("=")
+         envmap[assignment[0]] = assignment[1]
+      elif t.count("export") > 0:
+         # the case when we export or a simple variable
+         # need to consider the case when this has not been previously assigned
+         variable = t.split()[1]
+         if not variable in envmap:
+            envmap[variable]=""
+
+    return envmap
 
 #
 # functions for execution; encapsulated in a WorkflowExecutor class
@@ -417,7 +490,7 @@ class WorkflowExecutor:
     def __init__(self, workflowfile, args, jmax=100):
       self.args=args
       self.workflowfile = workflowfile
-      self.workflowspec = load_workflow(workflowfile)
+      self.workflowspec = load_json(workflowfile)
       self.workflowspec = filter_workflow(self.workflowspec, args.target_tasks, args.target_labels)
 
       if not self.workflowspec['stages']:
@@ -439,6 +512,9 @@ class WorkflowExecutor:
       for i in range(len(self.taskuniverse)):
           self.tasktoid[self.taskuniverse[i]]=i
           self.idtotask[i]=self.taskuniverse[i]
+
+      if args.update_resources:
+          update_resource_estimates(self.workflowspec, args.update_resources)
 
       self.maxmemperid = [ self.workflowspec['stages'][tid]['resources']['mem'] for tid in range(len(self.taskuniverse)) ]
       self.cpuperid = [ self.workflowspec['stages'][tid]['resources']['cpu'] for tid in range(len(self.taskuniverse)) ]
@@ -466,7 +542,12 @@ class WorkflowExecutor:
       self.internalmonitorid = 0 # internal use
       self.tids_marked_toretry = [] # sometimes we might want to retry a failed task (simply because it was "unlucky") and we put them here
       self.retry_counter = [ 0 for tid in range(len(self.taskuniverse)) ] # we keep track of many times retried already
+      self.task_retries = [ self.workflowspec['stages'][tid].get('retry_count',0) for tid in range(len(self.taskuniverse)) ] # the per task specific "retry" number -> needs to be parsed from the JSON
+
       self.semaphore_values = { self.workflowspec['stages'][tid].get('semaphore'):0 for tid in range(len(self.taskuniverse)) if self.workflowspec['stages'][tid].get('semaphore')!=None } # keeps current count of semaphores (defined in the json workflow). used to achieve user-defined "critical sections".
+      self.alternative_envs = {} # mapping of taskid to alternative software envs (to be applied on a per-task level)
+      # init alternative software environments
+      self.init_alternative_software_environments()
 
     def SIGHandler(self, signum, frame):
        # basically forcing shut down of all child processes
@@ -544,6 +625,15 @@ class WorkflowExecutor:
       # add task specific environment
       if self.workflowspec['stages'][tid].get('env')!=None:
           taskenv.update(self.workflowspec['stages'][tid]['env'])
+
+      # apply specific (non-default) software version, if any
+      # (this was setup earlier)
+      alternative_env = self.alternative_envs.get(tid, None)
+      if alternative_env != None:
+          actionlogger.info('Applying alternative software environment to task ' + self.idtotask[tid])
+          for entry in alternative_env:
+              # overwrite what is present in default
+              taskenv[entry] = alternative_env[entry]
 
       p = psutil.Popen(['/bin/bash','-c',c], cwd=workdir, env=taskenv)
       try:
@@ -799,7 +889,7 @@ class WorkflowExecutor:
             if returncode != 0:
                print (str(self.idtotask[tid]) + ' failed ... checking retry')
                # we inspect if this is something "unlucky" which could be resolved by a simple resubmit
-               if self.is_worth_retrying(tid) and self.retry_counter[tid] < int(args.retry_on_failure):
+               if self.is_worth_retrying(tid) and ((self.retry_counter[tid] < int(args.retry_on_failure)) or (self.retry_counter[tid] < int(self.task_retries[tid]))):
                  print (str(self.idtotask[tid]) + ' to be retried')
                  actionlogger.info ('Task ' + str(self.idtotask[tid]) + ' failed but marked to be retried ')
                  self.tids_marked_toretry.append(tid)
@@ -918,6 +1008,24 @@ class WorkflowExecutor:
            actionlogger.info("Copying to alien " + copycommand)
            os.system(copycommand)
 
+    def init_alternative_software_environments(self):
+        """
+        Initiatialises alternative software environments for specific tasks, if there
+        is an annotation in the workflow specificiation.
+        """
+
+        environment_cache = {}
+        # go through all the tasks once and setup environment
+        for taskid in range(len(self.workflowspec['stages'])):
+          packagestr = self.workflowspec['stages'][taskid].get("alternative_alienv_package")
+          if packagestr == None:
+             continue
+
+          if environment_cache.get(packagestr) == None:
+             environment_cache[packagestr] = get_alienv_software_environment(packagestr)
+
+          self.alternative_envs[taskid] = environment_cache[packagestr]
+
 
     def analyse_files_and_connections(self):
         for p,s in self.pid_to_files.items():
@@ -1025,10 +1133,13 @@ class WorkflowExecutor:
         psutil.cpu_percent(interval=None)
         os.environ['JOBUTILS_SKIPDONE'] = "ON"
         # a bit ALICEO2+O2DPG specific but for now a convenient place to
-        # restore original behaviour of ALICEO2_CCDB_LOCALCACHE semantics
+        # force presence of ALICEO2_CCDB_LOCALCACHE (needed for MC)
         # TODO: introduce a proper workflow-globalinit section which is defined inside the workflow json
-        if os.environ.get('ALICEO2_CCDB_LOCALCACHE') != None:
-           os.environ['IGNORE_VALIDITYCHECK_OF_CCDB_LOCALCACHE'] = "ON"
+        # TODO: explicitely tell reco workflows where to pickup GRP from disc
+        if os.environ.get('ALICEO2_CCDB_LOCALCACHE') == None:
+           print ("ALICEO2_CCDB_LOCALCACHE not set; setting to default") 
+           os.environ['ALICEO2_CCDB_LOCALCACHE'] = os.getcwd() + "/.ccdb"
+        os.environ['IGNORE_VALIDITYCHECK_OF_CCDB_LOCALCACHE'] = "ON"
 
         errorencountered = False
 

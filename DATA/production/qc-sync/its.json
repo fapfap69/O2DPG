@@ -19,7 +19,7 @@
         "url": "http://ali-consul.cern.ch:8500"
       },
       "conditionDB": {
-        "url": "http://localhost:8084"
+        "url": "https://alice-ccdb.cern.ch"
       }
     },
     "tasks": {
@@ -43,7 +43,8 @@
           "geomPath": "",
           "nThreads": "1",
           "nBCbins" : "103",
-          "dicttimestamp" : "0"
+          "dicttimestamp" : "0",
+          "publishSummary1D": "0"
         },
           "localMachines": [
           "localhost", "epn"
@@ -88,8 +89,19 @@
         "active": "true",
         "className": "o2::quality_control_modules::its::ITSClusterCheck",
         "moduleName": "QcITS",
-        "policy": "OnAny",
+        "policy": "OnEachSeparately",
         "detectorName": "ITS",
+        "checkParameters": {
+          "maxcluoccL0" : "5",
+          "maxcluoccL1" : "4",
+          "maxcluoccL2" : "3",
+          "maxcluoccL3" : "2",
+          "maxcluoccL4" : "1",
+          "maxcluoccL5" : "1",
+          "maxcluoccL6" : "1",
+          "skipxbinsoccupancy" : "",
+          "skipybinsoccupancy" : ""
+        },
         "dataSource": [
           {
             "type": "Task",
@@ -117,7 +129,7 @@
         "active": "true",
         "className": "o2::quality_control_modules::its::ITSTrackCheck",
         "moduleName": "QcITS",
-        "policy": "OnAny",
+        "policy": "OnEachSeparately",
         "detectorName": "ITS",
         "dataSource": [
           {

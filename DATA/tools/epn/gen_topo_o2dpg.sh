@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Some defaults
+[[ -z "$GEN_TOPO_STDERR_LOGGING" ]] && export GEN_TOPO_STDERR_LOGGING=1 # Enable logging of stderr messages
+[[ -z "$IS_SIMULATED_DATA" ]] && export IS_SIMULATED_DATA=0 # by default we are processing raw data
+
 # Check settings coming from AliECS via env variables
 if [[ -z $GEN_TOPO_HASH ]]; then echo \$GEN_TOPO_HASH missing; exit 1; fi # Flag whether source is a hash or a folder
 if [[ -z $GEN_TOPO_SOURCE ]]; then echo \$GEN_TOPO_SOURCE missing; exit 1; fi # O2DPG repository source, either a commit hash or a path
@@ -26,6 +30,12 @@ if [[ -z "$IS_SIMULATED_DATA" ]]; then echo \$IS_SIMULATED_DATA missing; exit 1;
 if [[ -z "$GEN_TOPO_ODC_EPN_TOPO_ARGS" ]]; then echo \$GEN_TOPO_ODC_EPN_TOPO_ARGS missing; exit 1; fi
 if [[ -z "$GEN_TOPO_EPN_CCDB_SERVER" ]]; then echo \$GEN_TOPO_EPN_CCDB_SERVER missing; exit 1; fi
 
+# Replace TRG by CTP
+export WORKFLOW_DETECTORS=${WORKFLOW_DETECTORS/TRG/CTP}
+export WORKFLOW_DETECTORS_QC=${WORKFLOW_DETECTORS_QC/TRG/CTP}
+export WORKFLOW_DETECTORS_CALIB=${WORKFLOW_DETECTORS_CALIB/TRG/CTP}
+
+mkdir -p $GEN_TOPO_WORKDIR || { echo Error creating directory 1>&2; exit 1; }
 for i in `seq 1 100`; do
   exec 100>${GEN_TOPO_WORKDIR}/${i}.lock || { echo Cannot create file descriptor for lock file 1>&2; exit 1; }
   flock -n -E 100 100
@@ -62,7 +72,7 @@ if [[ $GEN_TOPO_HASH == 1 ]]; then
   cd O2DPG
   git checkout $GEN_TOPO_SOURCE &> /dev/null
   if [[ $? != 0 ]]; then
-    git fetch origin 1>&2 || { echo Repository update failed 1>&2; exit 1; }
+    git fetch --tags origin 1>&2 || { echo Repository update failed 1>&2; exit 1; }
     git checkout $GEN_TOPO_SOURCE &> /dev/null || { echo commit does not exist 1>&2; exit 1; }
   fi
   # At a tag, or a detached non-dirty commit, but not on a branch

@@ -21,7 +21,7 @@ fi
 
 # checking for remapping
 if [[ $remappingITS == 1 ]] || [[ $remappingMFT == 1 ]]; then
-  REMAPPING="--condition-remap \"http://alice-ccdb.cern.ch/RecITSMFT="
+  REMAPPING="--condition-remap \"https://alice-ccdb.cern.ch/RecITSMFT="
   if [[ $remappingITS == 1 ]]; then
     REMAPPING=$REMAPPING"ITS/Calib/ClusterDictionary"
     if [[ $remappingMFT == 1 ]]; then
@@ -70,9 +70,9 @@ export CONFIG_EXTRA_PROCESS_o2_its_reco_workflow="ITSVertexerParam.phiCut=0.5;IT
 export CONFIG_EXTRA_PROCESS_o2_gpu_reco_workflow="TPCGasParam.DriftV=$VDRIFT;GPU_global.dEdxDisableResidualGainMap=1"
 
 # ad-hoc settings for TOF reco
-# export ARGS_EXTRA_PROCESS_o2_tof_reco_workflow="--use-ccdb --ccdb-url-tof \"http://alice-ccdb.cern.ch\""
+# export ARGS_EXTRA_PROCESS_o2_tof_reco_workflow="--use-ccdb --ccdb-url-tof \"https://alice-ccdb.cern.ch\""
 # since commit on Dec, 4
-export ARGS_EXTRA_PROCESS_o2_tof_reco_workflow="--use-ccdb --for-calib"
+export ARGS_EXTRA_PROCESS_o2_tof_reco_workflow="--use-ccdb"
 
 # ad-hoc options for primary vtx workflow
 #export PVERTEXER="pvertexer.acceptableScale2=9;pvertexer.minScale2=2.;pvertexer.nSigmaTimeTrack=4.;pvertexer.timeMarginTrackTime=0.5;pvertexer.timeMarginVertexTime=7.;pvertexer.nSigmaTimeCut=10;pvertexer.dbscanMaxDist2=30;pvertexer.dcaTolerance=3.;pvertexer.pullIniCut=100;pvertexer.addZSigma2=0.1;pvertexer.tukey=20.;pvertexer.addZSigma2Debris=0.01;pvertexer.addTimeSigma2Debris=1.;pvertexer.maxChi2Mean=30;pvertexer.timeMarginReattach=3.;pvertexer.addTimeSigma2Debris=1.;"
@@ -138,9 +138,11 @@ export CALIB_TOF_DIAGNOSTICS=0
 export CALIB_TPC_TIMEGAIN=0
 export CALIB_TPC_RESPADGAIN=0
 export CALIB_TRD_VDRIFTEXB=0
-export CALIB_EMC_CHANNELCALIB=0
+export CALIB_EMC_BADCHANNELCALIB=0
+export CALIB_EMC_TIMECALIB=0
 export CALIB_PHS_ENERGYCALIB=0
 export CALIB_PHS_BADMAPCALIB=0
 export CALIB_PHS_TURNONCALIB=0
 export CALIB_PHS_RUNBYRUNCALIB=0
+export CALIB_TPC_VDRIFTTGL=0
 export CALIB_CPV_GAIN=0
